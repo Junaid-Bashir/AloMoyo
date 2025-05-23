@@ -1,96 +1,95 @@
 # app/routers/contributions.py
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlmodel import Session, select
 from typing import List
-from datetime import datetime
+
+from shapely import wkt as shapely_wkt
 
 from app.database.db import get_db
 from app.models.contribution import Contribution
-from app.schemas import ContributionCreate, ContributionRead, MeModel
-from app.routers.auth import get_current_user, get_current_admin
-
+from app.schemas import ContributionCreate, ContributionRead
+from app.services.auth import get_current_user, get_current_admin
 from app.services.postal_service import get_postal_service
 from app.services.geocode import get_road_name
 
-from openlocationcode import openlocationcode as olc
-from app.core.codes import make_human_code
-
 router = APIRouter(prefix="/contributions", tags=["Contributions"])
 
-def extract_lat_lon_from_wkt(wkt: str) -> tuple:
-    try:
-        if wkt.startswith("POINT"):
-            coords = wkt.replace("POINT(", "").replace(")", "").split()
-            lon, lat = map(float, coords)
-            return lat, lon
-    except Exception:
-        pass
-    return None, None
 
-@router.post("/", response_model=ContributionRead)
-def submit_contribution(
+def extract_latlon_from_wkt(wkt_str: str) -> tuple[float, float]:
+    """
+    Parse a WKT POINT string into (lat, lon).
+    Expects 'POINT(lon lat)'.
+    """
+    geom = shapely_wkt.loads(wkt_str)
+    return geom.y, geom.x
+
+
+@router.post("/", response_model=ContributionRead, status_code=status.HTTP_201_CREATED)
+def create_contribution(
     payload: ContributionCreate,
     db: Session = Depends(get_db),
-    current_user: MeModel = Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ) -> ContributionRead:
+    # 1) Store the raw WKT
     contrib = Contribution(
-        **payload.dict(),
+        wkt=payload.wkt,
         submitted_by_user_id=current_user.id,
-        created_at=datetime.utcnow(),
         is_approved=False,
     )
     db.add(contrib)
+    db.flush()
+
+    # 2) Extract lat/lon and enrich
+    lat, lon = extract_latlon_from_wkt(payload.wkt)
+    postal = get_postal_service().nearest(lat, lon, current_user.country_code)
+    road_name = get_road_name(lat, lon)
+
+    # 3) Fill in address fields
+    contrib.postal_code   = postal.postal_code
+    contrib.district_name = postal.place_name
+    contrib.road_name     = road_name
+    contrib.full_address  = (
+        f"{road_name}, {postal.postal_code}, "
+        f"{postal.place_name}, {current_user.country_code.upper()}"
+    )
+
     db.commit()
     db.refresh(contrib)
     return contrib
 
-@router.patch("/{contrib_id}/approve", response_model=ContributionRead)
-def approve_contribution(
-    contrib_id: int,
-    db: Session = Depends(get_db),
-    admin: MeModel = Depends(get_current_admin),
-) -> ContributionRead:
-    contrib = db.get(Contribution, contrib_id)
-    if not contrib:
-        raise HTTPException(404, "Not found")
-
-    contrib.is_approved = True
-
-    if contrib.wkt:
-        lat, lon = extract_lat_lon_from_wkt(contrib.wkt)
-        if lat is None or lon is None:
-            raise HTTPException(400, "Could not extract coordinates from WKT")
-
-        # 1) plus code
-        contrib.digital_address = olc.encode(lat, lon)
-        # 2) human code
-        human_code = make_human_code(admin.country_code, "ctb", contrib.id)
-        contrib.code = human_code
-
-        # 3) postal lookup
-        ps = get_postal_service()
-        postal = ps.nearest(lat, lon, admin.country_code)
-
-        # 4) road name
-        road_name = get_road_name(lat, lon)
-
-        # 5) full address
-        contrib.postal_code = postal.postal_code
-        contrib.district_name = postal.place_name
-        contrib.full_address = (
-            f"{road_name}, {human_code}, "
-            f"{postal.postal_code}, {postal.place_name}, "
-            f"{admin.country_code.upper()}"
-        )
-
-    db.add(contrib)
-    db.commit()
-    db.refresh(contrib)
-    return contrib
 
 @router.get("/", response_model=List[ContributionRead])
 def list_contributions(
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ) -> List[ContributionRead]:
     return db.exec(select(Contribution)).all()
+
+
+@router.get("/{contrib_id}", response_model=ContributionRead)
+def read_contribution(
+    contrib_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> ContributionRead:
+    contrib = db.get(Contribution, contrib_id)
+    if not contrib:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+    return contrib
+
+
+@router.post("/{contrib_id}/approve", response_model=ContributionRead)
+def approve_contribution(
+    contrib_id: int,
+    db: Session = Depends(get_db),
+    admin_user=Depends(get_current_admin),
+) -> ContributionRead:
+    contrib = db.get(Contribution, contrib_id)
+    if not contrib:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+    contrib.is_approved = True
+    db.add(contrib)
+    db.commit()
+    db.refresh(contrib)
+    return contrib

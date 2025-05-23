@@ -6,7 +6,7 @@ from datetime import datetime
 from app.database.db import get_db
 from app.models.road import Road
 from app.schemas import RoadCreate, RoadRead, MeModel
-from app.routers.auth import get_current_user
+from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/roads", tags=["Roads"])
 

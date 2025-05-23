@@ -8,7 +8,7 @@ from datetime import datetime
 from app.database.db import get_db
 from app.models.home import Home
 from app.schemas import HomeCreate, HomeRead, MeModel
-from app.routers.auth import get_current_user
+from app.services.auth import get_current_user
 from app.core.codes import make_human_code
 
 from app.services.postal_service import get_postal_service
