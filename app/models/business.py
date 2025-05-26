@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field
 
+
+
 class Business(SQLModel, table=True):
     __tablename__ = "business"
 

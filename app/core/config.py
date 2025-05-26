@@ -1,6 +1,8 @@
 # app/core/config.py
 
+from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     """
@@ -12,12 +14,28 @@ class Settings(BaseSettings):
         extra="ignore",          # ignore unexpected env vars
     )
 
-    # Environment variables (exact names)
+    # Database & auth
     DATABASE_URL: str
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    APP_BASE_URL: str = "https://api.alokazi.com"
+
+    # Base URL for links (verification, shares, etc)
+    APP_BASE_URL: AnyHttpUrl
+
+    # Email / SMTP
+    SMTP_HOST: str
+    SMTP_PORT: int
+    SMTP_USER: str
+    SMTP_PASS: str
+    SMTP_TLS: bool
+    EMAIL_FROM: str
+
+    # Redis cache
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASS: str = ""  # leave empty if no password
 
     # Backwards-compatible lowercase properties
     @property
@@ -35,6 +53,7 @@ class Settings(BaseSettings):
     @property
     def access_token_expire_minutes(self) -> int:
         return self.ACCESS_TOKEN_EXPIRE_MINUTES
+
 
 # Single global settings instance
 settings = Settings()
