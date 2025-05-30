@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
-sqlmodel>=0.0.14
-pydantic>=2.7.0
-pydantic-settings>=2.7.0
+sqlmodel
+pydantic
+pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
 email-validator
@@ -18,3 +18,4 @@ python-multipart
 certifi
 pillow
 fastapi-cache2
+redis
